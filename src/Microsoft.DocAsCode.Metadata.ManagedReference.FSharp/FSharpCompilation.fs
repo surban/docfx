@@ -218,6 +218,11 @@ type FSharpCompilation (compilation: FSharpCheckProjectResults, projPath: string
         SortedList(Map[SyntaxLanguage.FSharp, value
                        SyntaxLanguage.Default, value])
 
+    /// Resolves an F# type abbrevation into an unabbreviated type.
+    let rec resolveAbbreviation (t: FSharpType) =
+        if t.IsAbbreviation then resolveAbbreviation t.AbbreviatedType
+        else t
+
     /// Full name of an F# type.
     let typeFullName (t: FSharpType) =
         if t.IsAbbreviation then
@@ -337,11 +342,11 @@ type FSharpCompilation (compilation: FSharpCheckProjectResults, projPath: string
             }
         | :? FSharpMemberOrFunctionOrValue as mem ->
             let logicalName = 
-                mem.LogicalEnclosingEntity.AccessPath + "." + (entityNames mem.LogicalEnclosingEntity).DisplayName
+                mem.ApparentEnclosingEntity.AccessPath + "." + (entityNames mem.ApparentEnclosingEntity).DisplayName
             let iasName =
                 if mem.IsOverrideOrExplicitInterfaceImplementation then 
                     match Seq.tryHead mem.ImplementedAbstractSignatures with
-                    | Some ias -> ias.DeclaringType.TypeDefinition.FullName + "." 
+                    | Some ias -> (resolveAbbreviation ias.DeclaringType).TypeDefinition.FullName + "." 
                     | _ -> ""
                  else ""                
             let baseName = 
@@ -366,10 +371,11 @@ type FSharpCompilation (compilation: FSharpCheckProjectResults, projPath: string
                 |> String.concat ""            
             let ifType fullType = 
                 if mem.IsOverrideOrExplicitInterfaceImplementation then
-                    match Seq.tryHead mem.ImplementedAbstractSignatures with
-                    | Some ias when ias.DeclaringType.TypeDefinition.IsInterface -> 
-                        sprintf "interface %s with " (typeSyntax fullType ias.DeclaringType)
-                    | Some ias when ias.DeclaringType.TypeDefinition.FullName = encEnt.FullName -> 
+                    match Seq.tryHead mem.ImplementedAbstractSignatures 
+                          |> Option.map (fun ias -> resolveAbbreviation ias.DeclaringType) with
+                    | Some dt when dt.TypeDefinition.IsInterface -> 
+                        sprintf "interface %s with " (typeSyntax fullType dt)
+                    | Some dt when dt.TypeDefinition.FullName = encEnt.FullName -> 
                         "default "
                     | Some _ -> "override "
                     | None -> ""
@@ -602,7 +608,7 @@ type FSharpCompilation (compilation: FSharpCheckProjectResults, projPath: string
                                     not mem.IsConstructor && not mem.IsPropertyGetterMethod && 
                                     not mem.IsPropertySetterMethod &&
                                     (mem.IsProperty || mem.IsMember))
-        |> Seq.map (fun mem -> symbolRef (symbolNames mem mem.EnclosingEntity.Value))
+        |> Seq.map (fun mem -> symbolRef (symbolNames mem mem.DeclaringEntity.Value))
 
     /// All members (transitively) inherited by the specified F# type returned as references.
     let rec inheritedMembers filter (t: FSharpType option) = seq {
@@ -753,12 +759,12 @@ type FSharpCompilation (compilation: FSharpCheckProjectResults, projPath: string
             // F# member of module, class or interface 
             // (module function, module value, constructor, method, property, event)
             let logicalName = 
-                mem.LogicalEnclosingEntity.AccessPath + "." + (entityNames mem.LogicalEnclosingEntity).DisplayName
+                mem.ApparentEnclosingEntity.AccessPath + "." + (entityNames mem.ApparentEnclosingEntity).DisplayName
             let baseName = 
                 encMd.Name + "." + 
                 (if mem.IsExtensionMember then "___" + logicalName + "." else "") +
                 (match Seq.tryHead mem.ImplementedAbstractSignatures with
-                    | Some ias -> ias.DeclaringType.TypeDefinition.FullName + "." 
+                    | Some ias -> (resolveAbbreviation ias.DeclaringType).TypeDefinition.FullName + "." 
                     | None -> "") +
                 (if mem.IsConstructor then "#ctor" else mem.DisplayName)
             symMd.Syntax.Parameters <- curriedParamsMetadata mem.CurriedParameterGroups
@@ -805,11 +811,11 @@ type FSharpCompilation (compilation: FSharpCheckProjectResults, projPath: string
                 match Seq.tryHead bestMatchingCount with
                 | Some (_, bestMatching) when Seq.length bestMatching = 1 ->
                     let overridden = Seq.exactlyOne bestMatching
-                    symMd.Overridden <- symbolRef (symbolNames overridden overridden.EnclosingEntity.Value)
+                    symMd.Overridden <- symbolRef (symbolNames overridden overridden.DeclaringEntity.Value)
                 | Some (_, bestMatching) ->
                     Log.verbose "Cannot uniquely determine what member is overriden by %s" symMd.Name
                     let overridden = Seq.head bestMatching
-                    symMd.Overridden <- symbolRef (symbolNames overridden overridden.EnclosingEntity.Value)
+                    symMd.Overridden <- symbolRef (symbolNames overridden overridden.DeclaringEntity.Value)
                 | None ->
                     Log.verbose "Cannot determine what member is overridden by %s" symMd.Name
             | None -> ()          
@@ -830,10 +836,11 @@ type FSharpCompilation (compilation: FSharpCheckProjectResults, projPath: string
                  if mem.IsDispatchSlot then yield "abstract "]
                 |> String.concat ""            
             let ifType fullType = 
-                match Seq.tryHead mem.ImplementedAbstractSignatures with
-                | Some ias when ias.DeclaringType.TypeDefinition.IsInterface -> 
-                    sprintf "interface %s with " (typeSyntax fullType ias.DeclaringType)
-                | Some ias when ias.DeclaringType.TypeDefinition.FullName = encEnt.FullName -> 
+                match Seq.tryHead mem.ImplementedAbstractSignatures
+                      |> Option.map (fun ias -> resolveAbbreviation ias.DeclaringType) with
+                | Some dt when dt.TypeDefinition.IsInterface -> 
+                    sprintf "interface %s with " (typeSyntax fullType dt)
+                | Some dt when dt.TypeDefinition.FullName = encEnt.FullName -> 
                     "default "
                 | Some _ -> "override "
                 | None -> ""

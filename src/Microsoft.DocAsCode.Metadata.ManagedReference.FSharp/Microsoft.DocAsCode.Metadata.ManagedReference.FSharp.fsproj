@@ -20,8 +20,8 @@
 
   <ItemGroup>
     <PackageReference Include="Dotnet.ProjInfo" version="0.9.0" />
-    <PackageReference Include="FSharp.Compiler.Service" version="17.0.1" />
-    <PackageReference Include="FSharp.Compiler.Service.MSBuild.v12" version="17.0.1" />
+    <PackageReference Include="FSharp.Compiler.Service" version="22.0.3" />
+    <PackageReference Include="FSharp.Compiler.Service.MSBuild.v12" version="22.0.3" />
   </ItemGroup>
 
   <ItemGroup Condition="'$(TargetFramework)' == 'net461' OR '$(TargetFramework)' == 'net46' OR '$(TargetFramework)' == 'net452'">
