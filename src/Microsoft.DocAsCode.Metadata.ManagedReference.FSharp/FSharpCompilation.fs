@@ -342,23 +342,18 @@ type FSharpCompilation (compilation: FSharpCheckProjectResults, projPath: string
             }
         | :? FSharpMemberOrFunctionOrValue as mem ->
             let logicalName = 
-                mem.ApparentEnclosingEntity.AccessPath + "." + (entityNames mem.ApparentEnclosingEntity).DisplayName
-            let iasName =
-                if mem.IsOverrideOrExplicitInterfaceImplementation then 
-                    match Seq.tryHead mem.ImplementedAbstractSignatures with
-                    | Some ias -> (resolveAbbreviation ias.DeclaringType).TypeDefinition.FullName + "." 
-                    | _ -> ""
-                 else ""                
+                mem.ApparentEnclosingEntity.AccessPath + "." + (entityNames mem.ApparentEnclosingEntity).DisplayName           
+            let compiledName =
+                if mem.IsConstructor then "#ctor"
+                elif mem.IsPropertyGetterMethod || mem.IsPropertySetterMethod || mem.IsProperty then mem.CompiledName.["get_".Length..]
+                elif mem.CompiledName.StartsWith("op_Explicit") then "op_Explicit_" + (typeSyntax true mem.ReturnParameter.Type)
+                else mem.CompiledName
             let baseName = 
                 encEntName + "." + 
                 (if mem.IsExtensionMember then "___" + logicalName + "." else "") +
-                iasName +
-                (if mem.IsConstructor then "#ctor" else mem.DisplayName)
-            let name =
-                if mem.CompiledName.StartsWith("op_Explicit") then
-                    encEntName + "->" + (typeSyntax true mem.ReturnParameter.Type)
-                else
-                    baseName + "(" + curriedParamSyntax false true mem.CurriedParameterGroups + ")"                
+                compiledName
+            let name = baseName + "(" + curriedParamSyntax false true mem.CurriedParameterGroups + ")"                
+
             let nonIndexProp = mem.IsProperty && mem.CurriedParameterGroups.[0].Count = 0
             let arrow = if mem.CurriedParameterGroups.Count > 0 && not nonIndexProp then " -> " else ""
             let dispParams = if nonIndexProp then "" else curriedParamSyntax false false mem.CurriedParameterGroups
@@ -760,13 +755,6 @@ type FSharpCompilation (compilation: FSharpCheckProjectResults, projPath: string
             // (module function, module value, constructor, method, property, event)
             let logicalName = 
                 mem.ApparentEnclosingEntity.AccessPath + "." + (entityNames mem.ApparentEnclosingEntity).DisplayName
-            let baseName = 
-                encMd.Name + "." + 
-                (if mem.IsExtensionMember then "___" + logicalName + "." else "") +
-                (match Seq.tryHead mem.ImplementedAbstractSignatures with
-                    | Some ias -> (resolveAbbreviation ias.DeclaringType).TypeDefinition.FullName + "." 
-                    | None -> "") +
-                (if mem.IsConstructor then "#ctor" else mem.DisplayName)
             symMd.Syntax.Parameters <- curriedParamsMetadata mem.CurriedParameterGroups
             symMd.Syntax.TypeParameters <- List(mem.GenericParameters |> Seq.map genericParamMetadata)
             if not (isUnitType mem.ReturnParameter.Type) then 
@@ -777,7 +765,10 @@ type FSharpCompilation (compilation: FSharpCheckProjectResults, projPath: string
 
             // add overload reference
             if mem.FullType.IsFunctionType || mem.IsProperty then
-                symMd.Overload <- baseName + "*"
+                symMd.Overload <- 
+                    match names.Name.IndexOf '(' with
+                    | -1 -> names.Name + "*"
+                    | p -> names.Name.[.. p-1] + "*"
                 let refParts = 
                     [LinkItem(DisplayName=dispName, DisplayNamesWithType=nameWithType, DisplayQualifiedNames=fullName)]
                 let ref = ReferenceItem(CommentId = "Overload:" + symMd.Overload,
